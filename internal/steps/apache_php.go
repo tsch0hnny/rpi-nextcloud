@@ -214,7 +214,7 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 			s.phase = apInstallingPHP
 			s.spinner = ui.NewSpinner("Installing PHP 8.4 and extensions...")
 			phpPkgs := "php8.4 php8.4-gd php8.4-sqlite3 php8.4-curl php8.4-zip " +
-				"php8.4-xml php8.4-mbstring php8.4-mysql php8.4-bz2 php8.4-intl " +
+				"php8.4-xml php8.4-simplexml php8.4-mbstring php8.4-mysql php8.4-bz2 php8.4-intl " +
 				"php8.4-smbclient php8.4-gmp php8.4-bcmath libapache2-mod-php8.4"
 			return s, tea.Batch(
 				s.spinner.Init(),
@@ -294,7 +294,8 @@ func (s *ApachePHPStep) View(state *State) string {
 				"# Add PHP 8.4 repository (packages.sury.org)\n" +
 				"sudo apt install apache2\n" +
 				"sudo apt install php8.4 php8.4-gd php8.4-sqlite3\n" +
-				"  php8.4-curl php8.4-zip php8.4-xml php8.4-mbstring\n" +
+				"  php8.4-curl php8.4-zip php8.4-xml php8.4-simplexml\n" +
+				"  php8.4-mbstring\n" +
 				"  php8.4-mysql php8.4-bz2 php8.4-intl php8.4-smbclient\n" +
 				"  php8.4-gmp php8.4-bcmath libapache2-mod-php8.4\n" +
 				"sudo a2enmod rewrite headers env dir mime php8.4")
