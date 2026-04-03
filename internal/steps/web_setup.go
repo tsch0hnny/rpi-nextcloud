@@ -2,6 +2,7 @@ package steps
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -26,6 +27,7 @@ type WebSetupStep struct {
 	complete bool
 	confirm  ui.ConfirmModel
 	url      string
+	isSSH    bool
 }
 
 func NewWebSetupStep() *WebSetupStep {
@@ -43,7 +45,14 @@ func (s *WebSetupStep) Init(state *State) tea.Cmd {
 	} else {
 		s.url = fmt.Sprintf("http://%s/nextcloud", state.IPAddress)
 	}
-	s.phase = wsShowInstructions
+	// Detect if running over SSH
+	s.isSSH = os.Getenv("SSH_CLIENT") != "" || os.Getenv("SSH_TTY") != "" || os.Getenv("SSH_CONNECTION") != ""
+	if s.isSSH {
+		// Skip browser prompt, go straight to waiting
+		s.phase = wsWaitingForUser
+	} else {
+		s.phase = wsShowInstructions
+	}
 	// Start loading image asynchronously
 	return ui.LoadImageAsync(setupImageURL, state.Width-8)
 }
@@ -136,9 +145,20 @@ func (s *WebSetupStep) View(state *State) string {
 	case wsConfirmOpen:
 		sections = append(sections, s.confirm.View())
 	case wsWaitingForUser:
+		w := state.Width - 8
+		if w > 70 {
+			w = 70
+		}
+		if s.isSSH {
+			sections = append(sections,
+				ui.WarningBox("You're connected via SSH. Open the URL above in a browser\non your local computer, complete the setup, then press ENTER.", w),
+			)
+		} else {
+			sections = append(sections,
+				ui.WarningBox("Complete the setup in your browser, then press ENTER here to continue.", w),
+			)
+		}
 		sections = append(sections,
-			ui.WarningBox("Complete the setup in your browser, then press ENTER here to continue.",
-				state.Width-8),
 			"",
 			style.KeyHintStyle.Render("Press ENTER when setup is complete →"),
 		)

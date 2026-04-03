@@ -189,6 +189,9 @@ func (s *ApacheConfStep) generateConfig(state *State) string {
     AllowOverride All
     Options FollowSymLinks MultiViews
 
+    SetEnv HOME /var/www/nextcloud
+    SetEnv HTTP_HOME /var/www/nextcloud
+
     <IfModule mod_dav.c>
       Dav off
     </IfModule>
@@ -202,6 +205,9 @@ func (s *ApacheConfStep) generateConfig(state *State) string {
   Require all granted
   AllowOverride All
   Options FollowSymLinks MultiViews
+
+  SetEnv HOME /var/www/nextcloud
+  SetEnv HTTP_HOME /var/www/nextcloud
 
   <IfModule mod_dav.c>
     Dav off

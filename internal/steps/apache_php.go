@@ -213,7 +213,7 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 			s.spinner = ui.NewSpinner("Enabling Apache modules...")
 			return s, tea.Batch(
 				s.spinner.Init(),
-				exec.RunSudoCommand("enable-modules", "a2enmod rewrite headers env dir mime"),
+				exec.RunSudoCommand("enable-modules", "a2enmod rewrite headers env dir mime php8.4"),
 			)
 
 		case "enable-modules":
@@ -275,7 +275,7 @@ func (s *ApachePHPStep) View(state *State) string {
 				"  php8.4-curl php8.4-zip php8.4-xml php8.4-mbstring\n" +
 				"  php8.4-mysql php8.4-bz2 php8.4-intl php8.4-smbclient\n" +
 				"  php8.4-gmp php8.4-bcmath libapache2-mod-php8.4\n" +
-				"sudo a2enmod rewrite headers env dir mime")
+				"sudo a2enmod rewrite headers env dir mime php8.4")
 		sections = append(sections,
 			style.SubtitleStyle.Render("The following will be installed:"),
 			"", packages, "",

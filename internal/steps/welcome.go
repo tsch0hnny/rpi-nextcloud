@@ -54,12 +54,16 @@ func (s *WelcomeStep) View(state *State) string {
 	if width > 80 {
 		width = 80
 	}
+	if width < 40 {
+		width = 40
+	}
 
 	logo := ui.Logo()
 
 	subtitle := lipgloss.NewStyle().
 		Foreground(style.ColorSubtle).
-		Render("This installer will guide you through setting up your own Nextcloud\npersonal cloud server on your Raspberry Pi.")
+		Width(width).
+		Render("This installer will guide you through setting up your own Nextcloud personal cloud server on your Raspberry Pi.")
 
 	features := lipgloss.NewStyle().
 		Foreground(style.ColorText).
@@ -74,11 +78,11 @@ func (s *WelcomeStep) View(state *State) string {
 
 	sysInfo := ""
 	if state.IPAddress != "" {
-		sysInfo = style.SubtitleStyle.Render("\n  Detected System:") + "\n" +
-			ui.StatusLine("IP Address", state.IPAddress, style.ColorAccent) + "\n" +
-			ui.StatusLine("Hostname", state.Hostname, style.ColorAccent)
+		sysInfo = "\n" + style.SubtitleStyle.Render("Detected System:") + "\n" +
+			"  " + ui.StatusLine("IP Address", state.IPAddress, style.ColorAccent) + "\n" +
+			"  " + ui.StatusLine("Hostname", state.Hostname, style.ColorAccent)
 		if s.checked && s.sysInfo.DiskFreeGB > 0 {
-			sysInfo += "\n" + ui.StatusLine("Disk Free", fmt.Sprintf("%.1f GB", s.sysInfo.DiskFreeGB), style.ColorAccent)
+			sysInfo += "\n  " + ui.StatusLine("Disk Free", fmt.Sprintf("%.1f GB", s.sysInfo.DiskFreeGB), style.ColorAccent)
 		}
 	}
 
@@ -107,7 +111,7 @@ func (s *WelcomeStep) View(state *State) string {
 		}
 	}
 
-	keyhints := style.KeyHintStyle.Render("  Navigation: ") +
+	keyhints := style.KeyHintStyle.Render("Navigation: ") +
 		style.KeyStyle.Render("h/l") + style.KeyHintStyle.Render(" switch  ") +
 		style.KeyStyle.Render("j/k") + style.KeyHintStyle.Render(" scroll  ") +
 		style.KeyStyle.Render("enter") + style.KeyHintStyle.Render(" confirm  ") +
@@ -116,9 +120,9 @@ func (s *WelcomeStep) View(state *State) string {
 	prompt := lipgloss.NewStyle().
 		Foreground(style.ColorPrimary).
 		Bold(true).
-		Render("\n  Press ENTER to begin →")
+		Render("Press ENTER to begin →")
 
-	return lipgloss.JoinVertical(lipgloss.Center,
+	return lipgloss.JoinVertical(lipgloss.Left,
 		"",
 		logo,
 		"",
@@ -129,6 +133,7 @@ func (s *WelcomeStep) View(state *State) string {
 		warnings,
 		"",
 		keyhints,
+		"",
 		prompt,
 	)
 }

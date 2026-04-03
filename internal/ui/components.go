@@ -61,23 +61,22 @@ func StatusLine(label, value string, color lipgloss.Color) string {
 		style.TextStyle.Render(value)
 }
 
-// Logo returns the Nextcloud ASCII art logo.
+// Logo returns the Nextcloud ASCII art logo, adapted to terminal width.
 func Logo() string {
-	logo := `
-    ╔═══════════════════════════════════════╗
-    ║                                       ║
-    ║     ███╗   ██╗███████╗██╗  ██╗████╗   ║
-    ║     ████╗  ██║██╔════╝╚██╗██╔╝╚═██║   ║
-    ║     ██╔██╗ ██║█████╗   ╚███╔╝   ██║   ║
-    ║     ██║╚██╗██║██╔══╝   ██╔██╗   ██║   ║
-    ║     ██║ ╚████║███████╗██╔╝ ██╗████║   ║
-    ║     ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═══╝  ║
-    ║                                       ║
-    ║        T C L O U D                    ║
-    ║                                       ║
-    ║   Raspberry Pi Nextcloud Installer    ║
-    ║                                       ║
-    ╚═══════════════════════════════════════╝`
+	logo := `╔═══════════════════════════════════════╗
+║                                       ║
+║     ███╗   ██╗███████╗██╗  ██╗████╗   ║
+║     ████╗  ██║██╔════╝╚██╗██╔╝╚═██║   ║
+║     ██╔██╗ ██║█████╗   ╚███╔╝   ██║   ║
+║     ██║╚██╗██║██╔══╝   ██╔██╗   ██║   ║
+║     ██║ ╚████║███████╗██╔╝ ██╗████║   ║
+║     ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═══╝  ║
+║                                       ║
+║        T C L O U D                    ║
+║                                       ║
+║   Raspberry Pi Nextcloud Installer    ║
+║                                       ║
+╚═══════════════════════════════════════╝`
 
 	return lipgloss.NewStyle().Foreground(style.ColorPrimary).Bold(true).Render(logo)
 }
