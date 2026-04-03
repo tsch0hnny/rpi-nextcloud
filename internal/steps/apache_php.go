@@ -23,6 +23,7 @@ const (
 	apAddingPHPRepo
 	apInstallingApache
 	apInstallingPHP
+	apDisablingOldPHP
 	apEnablingModules
 	apRestartingApache
 	apVerifying
@@ -53,11 +54,11 @@ func (s *ApachePHPStep) IsComplete() bool { return s.complete }
 
 func (s *ApachePHPStep) Init(state *State) tea.Cmd {
 	s.phase = apCheckExisting
-	// Check if Apache, PHP 8.4, and the Apache PHP module are all properly set up
+	// Check if Apache, PHP 8.4, and specifically the PHP 8.4 Apache module are loaded
 	return exec.RunCommand("check-apache-php",
 		"dpkg -l apache2 2>/dev/null | grep -q '^ii' && "+
 			"php8.4 --version >/dev/null 2>&1 && "+
-			"apache2ctl -M 2>/dev/null | grep -q php && "+
+			"grep -q 'libphp8.4' /etc/apache2/mods-enabled/php*.load 2>/dev/null && "+
 			"echo 'fully_installed'")
 }
 
@@ -100,12 +101,14 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 		if s.phase == apConfirmInstall {
 			if msg.Confirmed {
 				if s.alreadyInstalled {
-					// Packages already installed — just enable modules and restart
-					s.phase = apEnablingModules
-					s.spinner = ui.NewSpinner("Enabling Apache modules...")
+					// Packages already installed — disable old PHP, enable modules, restart
+					s.phase = apDisablingOldPHP
+					s.spinner = ui.NewSpinner("Removing conflicting PHP modules...")
 					return s, tea.Batch(
 						s.spinner.Init(),
-						exec.RunSudoCommand("enable-modules", "a2enmod rewrite headers env dir mime php8.4"),
+						exec.RunSudoCommand("disable-old-php",
+							"for v in 5.6 7.0 7.1 7.2 7.3 7.4 8.0 8.1 8.2 8.3; do a2dismod php$v 2>/dev/null; done; "+
+								"DEBIAN_FRONTEND=noninteractive apt remove -y libapache2-mod-php8.3 libapache2-mod-php8.2 libapache2-mod-php8.1 libapache2-mod-php8.0 2>/dev/null; true"),
 					)
 				}
 				s.phase = apUpdating
@@ -249,7 +252,7 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 			s.phase = apInstallingPHP
 			s.spinner = ui.NewSpinner("Installing PHP 8.4 and extensions...")
 			phpPkgs := "php8.4 php8.4-gd php8.4-sqlite3 php8.4-curl php8.4-zip " +
-				"php8.4-xml php8.4-simplexml php8.4-mbstring php8.4-mysql php8.4-bz2 php8.4-intl " +
+				"php8.4-xml php8.4-mbstring php8.4-mysql php8.4-bz2 php8.4-intl " +
 				"php8.4-smbclient php8.4-gmp php8.4-bcmath libapache2-mod-php8.4"
 			return s, tea.Batch(
 				s.spinner.Init(),
@@ -263,6 +266,19 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 				s.errMsg = "Failed to install PHP: " + msg.Err.Error()
 				return s, nil
 			}
+			// Disable any older PHP Apache modules before enabling 8.4
+			s.phase = apDisablingOldPHP
+			s.spinner = ui.NewSpinner("Removing conflicting PHP modules...")
+			return s, tea.Batch(
+				s.spinner.Init(),
+				exec.RunSudoCommand("disable-old-php",
+					"for v in 5.6 7.0 7.1 7.2 7.3 7.4 8.0 8.1 8.2 8.3; do a2dismod php$v 2>/dev/null; done; "+
+						"DEBIAN_FRONTEND=noninteractive apt remove -y libapache2-mod-php8.3 libapache2-mod-php8.2 libapache2-mod-php8.1 libapache2-mod-php8.0 2>/dev/null; true"),
+			)
+
+		case "disable-old-php":
+			s.completedSub = append(s.completedSub, "Conflicting PHP modules removed")
+			// This command always succeeds (ends with ; true), so no error check needed
 			s.phase = apEnablingModules
 			s.spinner = ui.NewSpinner("Enabling Apache modules...")
 			return s, tea.Batch(
@@ -291,21 +307,25 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 				s.errMsg = "Failed to restart Apache: " + msg.Err.Error()
 				return s, nil
 			}
-			// Verify PHP module is actually loaded
+			// Verify PHP 8.4 module is specifically loaded (not an older version)
 			s.phase = apVerifying
-			s.spinner = ui.NewSpinner("Verifying PHP module is loaded...")
+			s.spinner = ui.NewSpinner("Verifying PHP 8.4 module is loaded...")
 			return s, tea.Batch(
 				s.spinner.Init(),
-				exec.RunCommand("verify-php-mod", "apache2ctl -M 2>/dev/null | grep -q php && echo 'ok'"),
+				exec.RunCommand("verify-php-mod",
+					"apache2ctl -M 2>/dev/null | grep -q php && "+
+						"grep -q 'libphp8.4' /etc/apache2/mods-enabled/php*.load 2>/dev/null && "+
+						"echo 'ok'"),
 			)
 
 		case "verify-php-mod":
 			if msg.Err != nil || strings.TrimSpace(msg.Output) != "ok" {
 				s.phase = apError
-				s.errMsg = "PHP module is not loaded in Apache. Try: sudo a2enmod php8.4 && sudo systemctl restart apache2"
+				s.errMsg = "PHP 8.4 module is not loaded in Apache. A conflicting PHP version may be present. " +
+					"Try: sudo a2dismod php8.3 && sudo a2enmod php8.4 && sudo systemctl restart apache2"
 				return s, nil
 			}
-			s.completedSub = append(s.completedSub, "PHP module verified in Apache")
+			s.completedSub = append(s.completedSub, "PHP 8.4 module verified in Apache")
 			s.phase = apDone
 			return s, nil
 		}
@@ -344,10 +364,10 @@ func (s *ApachePHPStep) View(state *State) string {
 				"# Add PHP 8.4 repository (packages.sury.org)\n" +
 				"sudo apt install apache2\n" +
 				"sudo apt install php8.4 php8.4-gd php8.4-sqlite3\n" +
-				"  php8.4-curl php8.4-zip php8.4-xml php8.4-simplexml\n" +
-				"  php8.4-mbstring\n" +
+				"  php8.4-curl php8.4-zip php8.4-xml php8.4-mbstring\n" +
 				"  php8.4-mysql php8.4-bz2 php8.4-intl php8.4-smbclient\n" +
 				"  php8.4-gmp php8.4-bcmath libapache2-mod-php8.4\n" +
+				"# Disable conflicting PHP versions\n" +
 				"sudo a2enmod rewrite headers env dir mime php8.4")
 		sections = append(sections,
 			style.SubtitleStyle.Render("The following will be installed:"),
@@ -356,7 +376,7 @@ func (s *ApachePHPStep) View(state *State) string {
 		)
 
 	case apUpdating, apUpgrading, apAddingPHPRepo, apInstallingApache,
-		apInstallingPHP, apEnablingModules, apRestartingApache, apVerifying:
+		apInstallingPHP, apDisablingOldPHP, apEnablingModules, apRestartingApache, apVerifying:
 		for _, sub := range s.completedSub {
 			sections = append(sections, style.SuccessStyle.Render("  ✓ "+sub))
 		}
