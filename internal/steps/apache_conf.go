@@ -2,19 +2,21 @@ package steps
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tsch0hnny/rpi-nextcloud/internal/style"
 	"github.com/tsch0hnny/rpi-nextcloud/internal/exec"
+	"github.com/tsch0hnny/rpi-nextcloud/internal/style"
 	"github.com/tsch0hnny/rpi-nextcloud/internal/ui"
 )
 
 type acPhase int
 
 const (
-	acSelectMode acPhase = iota
+	acCheckExisting acPhase = iota
+	acSelectMode
 	acInputDomain
 	acConfirm
 	acWritingConfig
@@ -25,15 +27,16 @@ const (
 )
 
 type ApacheConfStep struct {
-	phase        acPhase
-	complete     bool
-	selector     ui.SelectorModel
-	input        ui.InputModel
-	confirm      ui.ConfirmModel
-	spinner      ui.SpinnerModel
-	completedSub []string
-	errMsg       string
-	configText   string
+	phase            acPhase
+	complete         bool
+	selector         ui.SelectorModel
+	input            ui.InputModel
+	confirm          ui.ConfirmModel
+	spinner          ui.SpinnerModel
+	completedSub     []string
+	errMsg           string
+	configText       string
+	alreadyInstalled bool
 }
 
 func NewApacheConfStep() *ApacheConfStep {
@@ -46,6 +49,13 @@ func (s *ApacheConfStep) IsOptional() bool  { return false }
 func (s *ApacheConfStep) IsComplete() bool  { return s.complete }
 
 func (s *ApacheConfStep) Init(state *State) tea.Cmd {
+	s.phase = acCheckExisting
+	// Check if nextcloud.conf is already enabled
+	return exec.RunCommand("check-apache-conf",
+		"test -f /etc/apache2/sites-enabled/nextcloud.conf && echo 'exists'")
+}
+
+func (s *ApacheConfStep) initSelector() {
 	s.phase = acSelectMode
 	s.selector = ui.NewSelector("How should Nextcloud be accessed?", []ui.SelectorItem{
 		{
@@ -59,7 +69,6 @@ func (s *ApacheConfStep) Init(state *State) tea.Cmd {
 			Value:       "domain",
 		},
 	})
-	return nil
 }
 
 func (s *ApacheConfStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
@@ -72,14 +81,16 @@ func (s *ApacheConfStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 			return s, cmd
 		case acInputDomain:
 			if key.Matches(msg, style.Keys.Escape) {
-				return s, s.Init(state) // back to mode selection
+				s.initSelector()
+				return s, nil
 			}
 			var cmd tea.Cmd
 			s.input, cmd = s.input.Update(msg)
 			return s, cmd
 		case acConfirm:
 			if key.Matches(msg, style.Keys.Escape) {
-				return s, s.Init(state) // back to mode selection
+				s.initSelector()
+				return s, nil
 			}
 			var cmd tea.Cmd
 			s.confirm, cmd = s.confirm.Update(msg)
@@ -121,6 +132,18 @@ func (s *ApacheConfStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 		}
 
 	case ui.ConfirmResult:
+		if s.phase == acConfirm && !msg.Confirmed && s.alreadyInstalled {
+			// User chose not to reconfigure — skip
+			s.phase = acDone
+			s.completedSub = []string{"Existing Apache configuration kept"}
+			return s, nil
+		}
+		if s.phase == acConfirm && msg.Confirmed && s.alreadyInstalled && s.configText == "" {
+			// User wants to reconfigure — show selector
+			s.alreadyInstalled = false
+			s.initSelector()
+			return s, nil
+		}
 		if s.phase == acConfirm && msg.Confirmed {
 			s.phase = acWritingConfig
 			s.spinner = ui.NewSpinner("Writing Apache configuration...")
@@ -133,6 +156,16 @@ func (s *ApacheConfStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 
 	case exec.CmdResult:
 		switch msg.Tag {
+		case "check-apache-conf":
+			if msg.Err == nil && strings.TrimSpace(msg.Output) == "exists" {
+				s.alreadyInstalled = true
+				s.phase = acConfirm
+				s.confirm = ui.NewConfirm("Apache Nextcloud config already exists. Reconfigure?", false)
+				return s, nil
+			}
+			s.initSelector()
+			return s, nil
+
 		case "write-config":
 			s.completedSub = append(s.completedSub, "Configuration file written")
 			if msg.Err != nil {
@@ -223,6 +256,9 @@ func (s *ApacheConfStep) View(state *State) string {
 	sections = append(sections, "", desc, "")
 
 	switch s.phase {
+	case acCheckExisting:
+		sections = append(sections, style.DescriptionStyle.Render("Checking for existing Apache configuration..."))
+
 	case acSelectMode:
 		sections = append(sections, s.selector.View())
 
@@ -259,7 +295,11 @@ func (s *ApacheConfStep) View(state *State) string {
 		if w > 70 {
 			w = 70
 		}
-		sections = append(sections, "", ui.SuccessBox("Apache configured for Nextcloud!", w))
+		doneMsg := "Apache configured for Nextcloud!"
+		if s.alreadyInstalled {
+			doneMsg = "Existing Apache configuration kept — skipping."
+		}
+		sections = append(sections, "", ui.SuccessBox(doneMsg, w))
 		sections = append(sections, "", style.KeyHintStyle.Render("Press ENTER to continue →"))
 
 	case acError:

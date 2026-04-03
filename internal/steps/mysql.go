@@ -2,19 +2,21 @@ package steps
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tsch0hnny/rpi-nextcloud/internal/style"
 	"github.com/tsch0hnny/rpi-nextcloud/internal/exec"
+	"github.com/tsch0hnny/rpi-nextcloud/internal/style"
 	"github.com/tsch0hnny/rpi-nextcloud/internal/ui"
 )
 
 type mysqlPhase int
 
 const (
-	myInputDBName mysqlPhase = iota
+	myCheckExisting mysqlPhase = iota
+	myInputDBName
 	myInputDBUser
 	myInputDBPassword
 	myConfirmInstall
@@ -28,14 +30,16 @@ const (
 )
 
 type MySQLStep struct {
-	phase         mysqlPhase
-	complete      bool
-	input         ui.InputModel
-	passwordInput ui.PasswordModel
-	confirm       ui.ConfirmModel
-	spinner       ui.SpinnerModel
-	completedSub  []string
-	errMsg        string
+	phase            mysqlPhase
+	complete         bool
+	input            ui.InputModel
+	passwordInput    ui.PasswordModel
+	confirm          ui.ConfirmModel
+	spinner          ui.SpinnerModel
+	completedSub     []string
+	errMsg           string
+	alreadyInstalled bool
+	existingDBName   string
 }
 
 func NewMySQLStep() *MySQLStep {
@@ -48,10 +52,11 @@ func (s *MySQLStep) IsOptional() bool  { return false }
 func (s *MySQLStep) IsComplete() bool  { return s.complete }
 
 func (s *MySQLStep) Init(state *State) tea.Cmd {
-	s.phase = myInputDBName
-	s.input = ui.NewInputWithValidation("Database Name", "nextclouddb", state.DBName,
-		"The name of the MySQL database for Nextcloud.", ui.ValidateDBName)
-	return s.input.Init()
+	s.phase = myCheckExisting
+	// Check if MariaDB is installed and the default database already exists
+	return exec.RunCommand("check-mysql",
+		fmt.Sprintf("dpkg -l mariadb-server 2>/dev/null | grep -q '^ii' && sudo mysql -u root -e \"SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='%s'\" 2>/dev/null | grep -q '%s' && echo 'exists'",
+			state.DBName, state.DBName))
 }
 
 func (s *MySQLStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
@@ -147,6 +152,23 @@ func (s *MySQLStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 
 	case exec.CmdResult:
 		switch msg.Tag {
+		case "check-mysql":
+			if msg.Err == nil && strings.TrimSpace(msg.Output) == "exists" {
+				s.alreadyInstalled = true
+				s.existingDBName = state.DBName
+				s.phase = myDone
+				s.completedSub = []string{
+					"MariaDB already installed",
+					fmt.Sprintf("Database '%s' already exists", state.DBName),
+				}
+				return s, nil
+			}
+			// Not installed or DB doesn't exist — proceed with setup
+			s.phase = myInputDBName
+			s.input = ui.NewInputWithValidation("Database Name", "nextclouddb", state.DBName,
+				"The name of the MySQL database for Nextcloud.", ui.ValidateDBName)
+			return s, s.input.Init()
+
 		case "install-mariadb":
 			s.completedSub = append(s.completedSub, "MariaDB server installed")
 			if msg.Err != nil {
@@ -226,6 +248,9 @@ func (s *MySQLStep) View(state *State) string {
 	sections = append(sections, "", desc, "")
 
 	switch s.phase {
+	case myCheckExisting:
+		sections = append(sections, style.DescriptionStyle.Render("Checking for existing database..."))
+
 	case myInputDBName:
 		sections = append(sections, s.input.View())
 
@@ -267,7 +292,11 @@ func (s *MySQLStep) View(state *State) string {
 		if w > 70 {
 			w = 70
 		}
-		sections = append(sections, "", ui.SuccessBox("Database configured successfully!", w))
+		doneMsg := "Database configured successfully!"
+		if s.alreadyInstalled {
+			doneMsg = fmt.Sprintf("MariaDB and database '%s' already exist — skipping.", s.existingDBName)
+		}
+		sections = append(sections, "", ui.SuccessBox(doneMsg, w))
 		sections = append(sections, "", style.KeyHintStyle.Render("Press ENTER to continue →"))
 
 	case myError:

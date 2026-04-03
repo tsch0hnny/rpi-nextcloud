@@ -1,6 +1,8 @@
 package steps
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -12,7 +14,8 @@ import (
 type apachePhase int
 
 const (
-	apSudoCheck apachePhase = iota
+	apCheckExisting apachePhase = iota
+	apSudoCheck
 	apSudoPassword
 	apConfirmInstall
 	apUpdating
@@ -27,14 +30,15 @@ const (
 )
 
 type ApachePHPStep struct {
-	phase         apachePhase
-	complete      bool
-	confirm       ui.ConfirmModel
-	passwordInput ui.PasswordModel
-	spinner       ui.SpinnerModel
-	output        string
-	errMsg        string
-	completedSub  []string
+	phase            apachePhase
+	complete         bool
+	confirm          ui.ConfirmModel
+	passwordInput    ui.PasswordModel
+	spinner          ui.SpinnerModel
+	output           string
+	errMsg           string
+	completedSub     []string
+	alreadyInstalled bool
 }
 
 func NewApachePHPStep() *ApachePHPStep {
@@ -47,8 +51,10 @@ func (s *ApachePHPStep) IsOptional() bool { return false }
 func (s *ApachePHPStep) IsComplete() bool { return s.complete }
 
 func (s *ApachePHPStep) Init(state *State) tea.Cmd {
-	s.phase = apSudoCheck
-	return exec.CheckSudoNopass()
+	s.phase = apCheckExisting
+	// Check if Apache and PHP 8.4 are already installed
+	return exec.RunCommand("check-apache-php",
+		"dpkg -l apache2 2>/dev/null | grep -q '^ii' && php8.4 --version >/dev/null 2>&1 && echo 'installed'")
 }
 
 func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
@@ -103,6 +109,19 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 
 	case exec.CmdResult:
 		switch msg.Tag {
+		case "check-apache-php":
+			if msg.Err == nil && strings.TrimSpace(msg.Output) == "installed" {
+				s.alreadyInstalled = true
+				s.phase = apDone
+				s.completedSub = []string{
+					"Apache2 already installed",
+					"PHP 8.4 already installed",
+				}
+				return s, nil
+			}
+			s.phase = apSudoCheck
+			return s, exec.CheckSudoNopass()
+
 		case "check-sudo-nopass":
 			if msg.Err == nil {
 				s.phase = apConfirmInstall
@@ -260,6 +279,9 @@ func (s *ApachePHPStep) View(state *State) string {
 	sections = append(sections, "", desc, "")
 
 	switch s.phase {
+	case apCheckExisting:
+		sections = append(sections, style.DescriptionStyle.Render("Checking for existing installation..."))
+
 	case apSudoCheck:
 		sections = append(sections, style.DescriptionStyle.Render("Checking sudo access..."))
 
@@ -298,7 +320,11 @@ func (s *ApachePHPStep) View(state *State) string {
 		if w > 70 {
 			w = 70
 		}
-		sections = append(sections, ui.SuccessBox("Apache2 and PHP 8.4 installed successfully!", w))
+		doneMsg := "Apache2 and PHP 8.4 installed successfully!"
+		if s.alreadyInstalled {
+			doneMsg = "Apache2 and PHP 8.4 are already installed — skipping."
+		}
+		sections = append(sections, ui.SuccessBox(doneMsg, w))
 		sections = append(sections, "", style.KeyHintStyle.Render("Press ENTER to continue →"))
 
 	case apError:

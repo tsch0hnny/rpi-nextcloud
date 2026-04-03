@@ -1,18 +1,21 @@
 package steps
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tsch0hnny/rpi-nextcloud/internal/style"
 	"github.com/tsch0hnny/rpi-nextcloud/internal/exec"
+	"github.com/tsch0hnny/rpi-nextcloud/internal/style"
 	"github.com/tsch0hnny/rpi-nextcloud/internal/ui"
 )
 
 type dlPhase int
 
 const (
-	dlConfirm dlPhase = iota
+	dlCheckExisting dlPhase = iota
+	dlConfirm
 	dlDownloading
 	dlExtracting
 	dlCreatingDataDir
@@ -24,12 +27,13 @@ const (
 )
 
 type DownloadStep struct {
-	phase        dlPhase
-	complete     bool
-	confirm      ui.ConfirmModel
-	spinner      ui.SpinnerModel
-	completedSub []string
-	errMsg       string
+	phase            dlPhase
+	complete         bool
+	confirm          ui.ConfirmModel
+	spinner          ui.SpinnerModel
+	completedSub     []string
+	errMsg           string
+	alreadyInstalled bool
 }
 
 func NewDownloadStep() *DownloadStep {
@@ -42,9 +46,10 @@ func (s *DownloadStep) IsOptional() bool  { return false }
 func (s *DownloadStep) IsComplete() bool  { return s.complete }
 
 func (s *DownloadStep) Init(state *State) tea.Cmd {
-	s.phase = dlConfirm
-	s.confirm = ui.NewConfirm("Download and install the latest Nextcloud release?", true)
-	return nil
+	s.phase = dlCheckExisting
+	// Check if Nextcloud is already downloaded and has key files
+	return exec.RunCommand("check-nextcloud",
+		"test -f /var/www/nextcloud/version.php && echo 'installed'")
 }
 
 func (s *DownloadStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
@@ -70,17 +75,37 @@ func (s *DownloadStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 		}
 
 	case ui.ConfirmResult:
-		if s.phase == dlConfirm && msg.Confirmed {
-			s.phase = dlDownloading
-			s.spinner = ui.NewSpinner("Downloading Nextcloud (this may take a few minutes)...")
-			s.completedSub = nil
-			cmd := exec.RunSudoCommand("download",
-				"cd /var/www && wget -q https://download.nextcloud.com/server/releases/latest.tar.bz2 -O latest.tar.bz2")
-			return s, tea.Batch(s.spinner.Init(), cmd)
+		if s.phase == dlConfirm {
+			if msg.Confirmed {
+				s.phase = dlDownloading
+				s.spinner = ui.NewSpinner("Downloading Nextcloud (this may take a few minutes)...")
+				s.completedSub = nil
+				cmd := exec.RunSudoCommand("download",
+					"cd /var/www && wget -q https://download.nextcloud.com/server/releases/latest.tar.bz2 -O latest.tar.bz2")
+				return s, tea.Batch(s.spinner.Init(), cmd)
+			}
+			if s.alreadyInstalled {
+				// User chose not to re-download — skip
+				s.phase = dlDone
+				s.completedSub = []string{"Nextcloud already installed at /var/www/nextcloud"}
+				return s, nil
+			}
 		}
 
 	case exec.CmdResult:
 		switch msg.Tag {
+		case "check-nextcloud":
+			if msg.Err == nil && strings.TrimSpace(msg.Output) == "installed" {
+				// Nextcloud already exists — ask user what to do
+				s.alreadyInstalled = true
+				s.phase = dlConfirm
+				s.confirm = ui.NewConfirm("Nextcloud is already installed at /var/www/nextcloud. Re-download?", false)
+				return s, nil
+			}
+			s.phase = dlConfirm
+			s.confirm = ui.NewConfirm("Download and install the latest Nextcloud release?", true)
+			return s, nil
+
 		case "download":
 			s.completedSub = append(s.completedSub, "Nextcloud archive downloaded")
 			if msg.Err != nil {
@@ -165,13 +190,24 @@ func (s *DownloadStep) View(state *State) string {
 	sections = append(sections, "", desc, "")
 
 	switch s.phase {
+	case dlCheckExisting:
+		sections = append(sections, style.DescriptionStyle.Render("Checking for existing Nextcloud installation..."))
+
 	case dlConfirm:
-		code := ui.CodeBlock("wget https://download.nextcloud.com/server/releases/latest.tar.bz2\ntar -xf latest.tar.bz2\nmkdir -p /var/www/nextcloud/data\nchown -R www-data:www-data /var/www/nextcloud/\nchmod 750 /var/www/nextcloud/data")
-		sections = append(sections,
-			style.SubtitleStyle.Render("Commands to execute:"),
-			"", code, "",
-			s.confirm.View(),
-		)
+		if s.alreadyInstalled {
+			sections = append(sections,
+				style.SuccessStyle.Render("  ✓ Nextcloud found at /var/www/nextcloud"),
+				"",
+				s.confirm.View(),
+			)
+		} else {
+			code := ui.CodeBlock("wget https://download.nextcloud.com/server/releases/latest.tar.bz2\ntar -xf latest.tar.bz2\nmkdir -p /var/www/nextcloud/data\nchown -R www-data:www-data /var/www/nextcloud/\nchmod 750 /var/www/nextcloud/data")
+			sections = append(sections,
+				style.SubtitleStyle.Render("Commands to execute:"),
+				"", code, "",
+				s.confirm.View(),
+			)
+		}
 
 	case dlDownloading, dlExtracting, dlCreatingDataDir, dlSettingOwnership, dlSettingPermissions, dlCleanup:
 		for _, sub := range s.completedSub {
@@ -187,7 +223,11 @@ func (s *DownloadStep) View(state *State) string {
 		if w > 70 {
 			w = 70
 		}
-		sections = append(sections, "", ui.SuccessBox("Nextcloud downloaded and extracted!", w))
+		doneMsg := "Nextcloud downloaded and extracted!"
+		if s.alreadyInstalled && len(s.completedSub) > 0 && s.completedSub[0] == "Nextcloud already installed at /var/www/nextcloud" {
+			doneMsg = "Nextcloud already installed — skipping download."
+		}
+		sections = append(sections, "", ui.SuccessBox(doneMsg, w))
 		sections = append(sections, "", style.KeyHintStyle.Render("Press ENTER to continue →"))
 
 	case dlError:
