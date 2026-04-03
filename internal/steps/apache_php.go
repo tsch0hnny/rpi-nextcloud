@@ -25,6 +25,7 @@ const (
 	apInstallingPHP
 	apEnablingModules
 	apRestartingApache
+	apVerifying
 	apDone
 	apError
 )
@@ -52,9 +53,12 @@ func (s *ApachePHPStep) IsComplete() bool { return s.complete }
 
 func (s *ApachePHPStep) Init(state *State) tea.Cmd {
 	s.phase = apCheckExisting
-	// Check if Apache and PHP 8.4 are already installed
+	// Check if Apache, PHP 8.4, and the Apache PHP module are all properly set up
 	return exec.RunCommand("check-apache-php",
-		"dpkg -l apache2 2>/dev/null | grep -q '^ii' && php8.4 --version >/dev/null 2>&1 && echo 'installed'")
+		"dpkg -l apache2 2>/dev/null | grep -q '^ii' && "+
+			"php8.4 --version >/dev/null 2>&1 && "+
+			"apache2ctl -M 2>/dev/null | grep -q php && "+
+			"echo 'fully_installed'")
 }
 
 func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
@@ -95,6 +99,15 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 	case ui.ConfirmResult:
 		if s.phase == apConfirmInstall {
 			if msg.Confirmed {
+				if s.alreadyInstalled {
+					// Packages already installed — just enable modules and restart
+					s.phase = apEnablingModules
+					s.spinner = ui.NewSpinner("Enabling Apache modules...")
+					return s, tea.Batch(
+						s.spinner.Init(),
+						exec.RunSudoCommand("enable-modules", "a2enmod rewrite headers env dir mime php8.4"),
+					)
+				}
 				s.phase = apUpdating
 				s.spinner = ui.NewSpinner("Updating package lists...")
 				s.completedSub = nil
@@ -110,27 +123,49 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 	case exec.CmdResult:
 		switch msg.Tag {
 		case "check-apache-php":
-			if msg.Err == nil && strings.TrimSpace(msg.Output) == "installed" {
+			if msg.Err == nil && strings.TrimSpace(msg.Output) == "fully_installed" {
+				// Packages installed AND PHP module loaded — truly nothing to do
 				s.alreadyInstalled = true
 				s.phase = apDone
 				s.completedSub = []string{
 					"Apache2 already installed",
 					"PHP 8.4 already installed",
+					"Apache PHP module already loaded",
 				}
 				return s, nil
 			}
+			// Check if packages are installed but module isn't loaded
+			return s, exec.RunCommand("check-packages-only",
+				"dpkg -l apache2 2>/dev/null | grep -q '^ii' && php8.4 --version >/dev/null 2>&1 && echo 'packages_ok'")
+
+		case "check-packages-only":
+			if msg.Err == nil && strings.TrimSpace(msg.Output) == "packages_ok" {
+				// Packages exist but PHP module not loaded — need sudo to enable modules + restart
+				s.alreadyInstalled = true
+				s.completedSub = []string{
+					"Apache2 already installed",
+					"PHP 8.4 already installed",
+				}
+				s.phase = apSudoCheck
+				return s, exec.CheckSudoNopass()
+			}
+			// Nothing installed — full installation needed
 			s.phase = apSudoCheck
 			return s, exec.CheckSudoNopass()
 
 		case "check-sudo-nopass":
+			confirmMsg := "Ready to install Apache2 and PHP 8.4?"
+			if s.alreadyInstalled {
+				confirmMsg = "Packages installed but PHP module not loaded. Enable modules and restart Apache?"
+			}
 			if msg.Err == nil {
 				s.phase = apConfirmInstall
-				s.confirm = ui.NewConfirm("Ready to install Apache2 and PHP 8.4?", true)
+				s.confirm = ui.NewConfirm(confirmMsg, true)
 				return s, nil
 			}
 			if exec.HasSudoPassword() {
 				s.phase = apConfirmInstall
-				s.confirm = ui.NewConfirm("Ready to install Apache2 and PHP 8.4?", true)
+				s.confirm = ui.NewConfirm(confirmMsg, true)
 				return s, nil
 			}
 			s.phase = apSudoPassword
@@ -256,13 +291,28 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 				s.errMsg = "Failed to restart Apache: " + msg.Err.Error()
 				return s, nil
 			}
+			// Verify PHP module is actually loaded
+			s.phase = apVerifying
+			s.spinner = ui.NewSpinner("Verifying PHP module is loaded...")
+			return s, tea.Batch(
+				s.spinner.Init(),
+				exec.RunCommand("verify-php-mod", "apache2ctl -M 2>/dev/null | grep -q php && echo 'ok'"),
+			)
+
+		case "verify-php-mod":
+			if msg.Err != nil || strings.TrimSpace(msg.Output) != "ok" {
+				s.phase = apError
+				s.errMsg = "PHP module is not loaded in Apache. Try: sudo a2enmod php8.4 && sudo systemctl restart apache2"
+				return s, nil
+			}
+			s.completedSub = append(s.completedSub, "PHP module verified in Apache")
 			s.phase = apDone
 			return s, nil
 		}
 	}
 
 	// Update spinner animation
-	if s.phase >= apUpdating && s.phase <= apRestartingApache {
+	if s.phase >= apUpdating && s.phase <= apVerifying {
 		var cmd tea.Cmd
 		s.spinner, cmd = s.spinner.Update(msg)
 		return s, cmd
@@ -306,7 +356,7 @@ func (s *ApachePHPStep) View(state *State) string {
 		)
 
 	case apUpdating, apUpgrading, apAddingPHPRepo, apInstallingApache,
-		apInstallingPHP, apEnablingModules, apRestartingApache:
+		apInstallingPHP, apEnablingModules, apRestartingApache, apVerifying:
 		for _, sub := range s.completedSub {
 			sections = append(sections, style.SuccessStyle.Render("  ✓ "+sub))
 		}
