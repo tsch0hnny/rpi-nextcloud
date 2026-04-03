@@ -49,8 +49,8 @@ func (s *MySQLStep) IsComplete() bool  { return s.complete }
 
 func (s *MySQLStep) Init(state *State) tea.Cmd {
 	s.phase = myInputDBName
-	s.input = ui.NewInput("Database Name", "nextclouddb", state.DBName,
-		"The name of the MySQL database for Nextcloud.")
+	s.input = ui.NewInputWithValidation("Database Name", "nextclouddb", state.DBName,
+		"The name of the MySQL database for Nextcloud.", ui.ValidateDBName)
 	return s.input.Init()
 }
 
@@ -63,14 +63,32 @@ func (s *MySQLStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 			s.input, cmd = s.input.Update(msg)
 			return s, cmd
 		case myInputDBUser:
+			if key.Matches(msg, style.Keys.Escape) {
+				s.phase = myInputDBName
+				s.input = ui.NewInputWithValidation("Database Name", "nextclouddb", state.DBName,
+					"The name of the MySQL database for Nextcloud.", ui.ValidateDBName)
+				return s, s.input.Init()
+			}
 			var cmd tea.Cmd
 			s.input, cmd = s.input.Update(msg)
 			return s, cmd
 		case myInputDBPassword:
+			if key.Matches(msg, style.Keys.Escape) {
+				s.phase = myInputDBUser
+				s.input = ui.NewInputWithValidation("Database User", "nextclouduser", state.DBUser,
+					"The MySQL user that Nextcloud will use to connect.", ui.ValidateDBUser)
+				return s, s.input.Init()
+			}
 			var cmd tea.Cmd
 			s.passwordInput, cmd = s.passwordInput.Update(msg)
 			return s, cmd
 		case myConfirmInstall:
+			if key.Matches(msg, style.Keys.Escape) {
+				s.phase = myInputDBPassword
+				s.passwordInput = ui.NewPassword("Database Password",
+					"Choose a strong password for the database user.")
+				return s, s.passwordInput.Init()
+			}
 			var cmd tea.Cmd
 			s.confirm, cmd = s.confirm.Update(msg)
 			return s, cmd
@@ -93,8 +111,8 @@ func (s *MySQLStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 		case myInputDBName:
 			state.DBName = msg.Value
 			s.phase = myInputDBUser
-			s.input = ui.NewInput("Database User", "nextclouduser", state.DBUser,
-				"The MySQL user that Nextcloud will use to connect.")
+			s.input = ui.NewInputWithValidation("Database User", "nextclouduser", state.DBUser,
+				"The MySQL user that Nextcloud will use to connect.", ui.ValidateDBUser)
 			return s, s.input.Init()
 		case myInputDBUser:
 			state.DBUser = msg.Value

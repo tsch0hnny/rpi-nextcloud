@@ -55,13 +55,12 @@ func (s *SSLStep) Init(state *State) tea.Cmd {
 func (s *SSLStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if key.Matches(msg, style.Keys.Skip) && s.phase <= sslConfirmEnable {
-			state.SSLEnabled = false
-			return s, func() tea.Msg { return StepSkipMsg{} }
-		}
-
 		switch s.phase {
 		case sslConfirmEnable, sslConfirmForceHTTPS:
+			if key.Matches(msg, style.Keys.Escape) {
+				state.SSLEnabled = false
+				return s, func() tea.Msg { return StepSkipMsg{} }
+			}
 			var cmd tea.Cmd
 			s.confirm, cmd = s.confirm.Update(msg)
 			return s, cmd

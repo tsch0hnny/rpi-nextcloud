@@ -43,24 +43,24 @@ func (s *UploadSizeStep) IsComplete() bool  { return s.complete }
 
 func (s *UploadSizeStep) Init(state *State) tea.Cmd {
 	s.phase = usInputLimit
-	s.input = ui.NewInput("Max Upload Size", "1024M", state.PHPUploadLimit,
-		"PHP's default 2MB limit is too low for cloud storage.\nRecommended: 1024M (1 GB). Use values like 512M, 2048M, etc.")
+	s.input = ui.NewInputWithValidation("Max Upload Size", "1024M", state.PHPUploadLimit,
+		"PHP's default 2MB limit is too low for cloud storage.\nRecommended: 1024M (1 GB). Use values like 512M, 2048M, etc.",
+		ui.ValidatePHPSize)
 	return s.input.Init()
 }
 
 func (s *UploadSizeStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if key.Matches(msg, style.Keys.Skip) && s.phase <= usConfirm {
-			return s, func() tea.Msg { return StepSkipMsg{} }
-		}
-
 		switch s.phase {
 		case usInputLimit:
 			var cmd tea.Cmd
 			s.input, cmd = s.input.Update(msg)
 			return s, cmd
 		case usConfirm:
+			if key.Matches(msg, style.Keys.Escape) {
+				return s, func() tea.Msg { return StepSkipMsg{} }
+			}
 			var cmd tea.Cmd
 			s.confirm, cmd = s.confirm.Update(msg)
 			return s, cmd

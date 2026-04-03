@@ -3,9 +3,10 @@ package exec
 import (
 	"net"
 	"os"
-	"os/exec"
+	osexec "os/exec"
 	"runtime"
 	"strings"
+	"syscall"
 )
 
 // SystemInfo holds detected system information.
@@ -15,9 +16,13 @@ type SystemInfo struct {
 	OS           string
 	Architecture string
 	IsRaspberry  bool
+	IsDebian     bool
+	HasApt       bool
 	HasApache    bool
 	HasMySQL     bool
 	HasPHP       bool
+	HasSystemd   bool
+	DiskFreeGB   float64
 }
 
 // DetectSystem gathers system information.
@@ -27,10 +32,8 @@ func DetectSystem() SystemInfo {
 		Architecture: runtime.GOARCH,
 	}
 
-	// Detect IP address
 	info.IPAddress = detectIP()
 
-	// Detect hostname
 	if h, err := os.Hostname(); err == nil {
 		info.Hostname = h
 	}
@@ -40,32 +43,41 @@ func DetectSystem() SystemInfo {
 		content := string(data)
 		info.IsRaspberry = strings.Contains(content, "Raspberry") || strings.Contains(content, "BCM")
 	}
-	// Also check device-tree model
 	if data, err := os.ReadFile("/proc/device-tree/model"); err == nil {
 		if strings.Contains(string(data), "Raspberry") {
 			info.IsRaspberry = true
 		}
 	}
 
-	// Check installed services
+	// Check Debian-based
+	if data, err := os.ReadFile("/etc/os-release"); err == nil {
+		content := strings.ToLower(string(data))
+		info.IsDebian = strings.Contains(content, "debian") ||
+			strings.Contains(content, "ubuntu") ||
+			strings.Contains(content, "raspbian")
+	}
+
+	// Check installed tools
+	info.HasApt = commandExists("apt")
 	info.HasApache = commandExists("apache2")
 	info.HasMySQL = commandExists("mysql") || commandExists("mariadb")
 	info.HasPHP = commandExists("php")
+	info.HasSystemd = commandExists("systemctl")
+
+	// Check disk space on /var
+	info.DiskFreeGB = diskFreeGB("/var")
 
 	return info
 }
 
-// detectIP finds the primary local IP address.
 func detectIP() string {
-	// First try hostname -I (common on Linux)
-	if out, err := exec.Command("hostname", "-I").Output(); err == nil {
+	if out, err := osexec.Command("hostname", "-I").Output(); err == nil {
 		parts := strings.Fields(string(out))
 		if len(parts) > 0 {
 			return parts[0]
 		}
 	}
 
-	// Fallback: connect to a remote address to determine local IP
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err == nil {
 		defer conn.Close()
@@ -73,7 +85,6 @@ func detectIP() string {
 		return addr.IP.String()
 	}
 
-	// Final fallback
 	addrs, err := net.InterfaceAddrs()
 	if err == nil {
 		for _, a := range addrs {
@@ -87,6 +98,14 @@ func detectIP() string {
 }
 
 func commandExists(name string) bool {
-	_, err := exec.LookPath(name)
+	_, err := osexec.LookPath(name)
 	return err == nil
+}
+
+func diskFreeGB(path string) float64 {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return -1
+	}
+	return float64(stat.Bavail*uint64(stat.Bsize)) / (1024 * 1024 * 1024)
 }

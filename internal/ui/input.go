@@ -7,13 +7,18 @@ import (
 	"github.com/tsch0hnny/rpi-nextcloud/internal/style"
 )
 
-// InputModel wraps a text input with a label and description.
+// ValidateFunc returns an error message if validation fails, or "" if valid.
+type ValidateFunc func(string) string
+
+// InputModel wraps a text input with a label, description, and optional validation.
 type InputModel struct {
 	Label       string
 	Description string
 	input       textinput.Model
 	Done        bool
 	Value       string
+	validate    ValidateFunc
+	errMsg      string
 }
 
 type InputResult struct {
@@ -21,6 +26,10 @@ type InputResult struct {
 }
 
 func NewInput(label, placeholder, defaultValue, description string) InputModel {
+	return NewInputWithValidation(label, placeholder, defaultValue, description, nil)
+}
+
+func NewInputWithValidation(label, placeholder, defaultValue, description string, validate ValidateFunc) InputModel {
 	ti := textinput.New()
 	ti.Placeholder = placeholder
 	ti.SetValue(defaultValue)
@@ -35,6 +44,7 @@ func NewInput(label, placeholder, defaultValue, description string) InputModel {
 		Label:       label,
 		Description: description,
 		input:       ti,
+		validate:    validate,
 	}
 }
 
@@ -51,9 +61,23 @@ func (m InputModel) Update(msg tea.Msg) (InputModel, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter":
-			m.Value = m.input.Value()
+			val := m.input.Value()
+			if val == "" {
+				m.errMsg = "Value cannot be empty"
+				return m, nil
+			}
+			if m.validate != nil {
+				if errMsg := m.validate(val); errMsg != "" {
+					m.errMsg = errMsg
+					return m, nil
+				}
+			}
+			m.Value = val
+			m.errMsg = ""
 			m.Done = true
 			return m, func() tea.Msg { return InputResult{Value: m.Value} }
+		default:
+			m.errMsg = "" // clear error on new input
 		}
 	}
 
@@ -73,8 +97,13 @@ func (m InputModel) View() string {
 	if desc != "" {
 		parts = append(parts, desc)
 	}
-	parts = append(parts, "", m.input.View(), "")
-	parts = append(parts, style.KeyHintStyle.Render("enter: confirm"))
+	parts = append(parts, "", m.input.View())
+
+	if m.errMsg != "" {
+		parts = append(parts, style.ErrorStyle.Render("  "+m.errMsg))
+	}
+
+	parts = append(parts, "", style.KeyHintStyle.Render("enter: confirm  esc: back"))
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }

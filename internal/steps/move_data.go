@@ -45,25 +45,24 @@ func (s *MoveDataStep) IsComplete() bool  { return s.complete }
 
 func (s *MoveDataStep) Init(state *State) tea.Cmd {
 	s.phase = mdInputDir
-	s.input = ui.NewInput("Data Directory", "/var/nextcloud/data", state.DataDirectory,
-		"Moving the data directory outside of /var/www improves security.\nThis is also how you'd point to an external hard drive.")
+	s.input = ui.NewInputWithValidation("Data Directory", "/var/nextcloud/data", state.DataDirectory,
+		"Moving the data directory outside of /var/www improves security.\nThis is also how you'd point to an external hard drive.",
+		ui.ValidatePath)
 	return s.input.Init()
 }
 
 func (s *MoveDataStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// Handle skip for optional step
-		if key.Matches(msg, style.Keys.Skip) && s.phase <= mdConfirm {
-			return s, func() tea.Msg { return StepSkipMsg{} }
-		}
-
 		switch s.phase {
 		case mdInputDir:
 			var cmd tea.Cmd
 			s.input, cmd = s.input.Update(msg)
 			return s, cmd
 		case mdConfirm:
+			if key.Matches(msg, style.Keys.Escape) {
+				return s, func() tea.Msg { return StepSkipMsg{} }
+			}
 			var cmd tea.Cmd
 			s.confirm, cmd = s.confirm.Update(msg)
 			return s, cmd

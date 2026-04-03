@@ -71,10 +71,16 @@ func (s *ApacheConfStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 			s.selector, cmd = s.selector.Update(msg)
 			return s, cmd
 		case acInputDomain:
+			if key.Matches(msg, style.Keys.Escape) {
+				return s, s.Init(state) // back to mode selection
+			}
 			var cmd tea.Cmd
 			s.input, cmd = s.input.Update(msg)
 			return s, cmd
 		case acConfirm:
+			if key.Matches(msg, style.Keys.Escape) {
+				return s, s.Init(state) // back to mode selection
+			}
 			var cmd tea.Cmd
 			s.confirm, cmd = s.confirm.Update(msg)
 			return s, cmd
@@ -95,8 +101,9 @@ func (s *ApacheConfStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 		state.ApacheMode = msg.Value
 		if msg.Value == "domain" {
 			s.phase = acInputDomain
-			s.input = ui.NewInput("Domain Name", "nextcloud.example.com", state.DomainName,
-				"Enter the domain or subdomain for your Nextcloud instance.")
+			s.input = ui.NewInputWithValidation("Domain Name", "nextcloud.example.com", state.DomainName,
+				"Enter the domain or subdomain for your Nextcloud instance.",
+				ui.ValidateDomain)
 			return s, s.input.Init()
 		}
 		s.configText = s.generateConfig(state)

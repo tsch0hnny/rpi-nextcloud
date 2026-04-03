@@ -11,6 +11,8 @@ import (
 	"github.com/tsch0hnny/rpi-nextcloud/internal/ui"
 )
 
+const setupImageURL = "https://pimylifeup.com/wp-content/uploads/2017/06/Raspberry-Pi-Nextcloud-Setup-Screen.jpg"
+
 type wsPhase int
 
 const (
@@ -42,7 +44,8 @@ func (s *WebSetupStep) Init(state *State) tea.Cmd {
 		s.url = fmt.Sprintf("http://%s/nextcloud", state.IPAddress)
 	}
 	s.phase = wsShowInstructions
-	return nil
+	// Start loading image asynchronously
+	return ui.LoadImageAsync(setupImageURL, state.Width-8)
 }
 
 func (s *WebSetupStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
@@ -70,19 +73,21 @@ func (s *WebSetupStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 	case ui.ConfirmResult:
 		if s.phase == wsConfirmOpen {
 			if msg.Confirmed {
-				// Open browser
 				openBrowser(s.url)
 			}
 			s.phase = wsWaitingForUser
 			return s, nil
 		}
+
+	case ui.ImageLoadedMsg:
+		// Image loaded in background, UI will pick it up from cache
+		return s, nil
 	}
 
 	return s, nil
 }
 
 func openBrowser(url string) {
-	// Try common browser openers
 	for _, cmd := range []string{"xdg-open", "open", "sensible-browser"} {
 		if _, err := exec.LookPath(cmd); err == nil {
 			_ = exec.Command(cmd, url).Start()
@@ -96,10 +101,9 @@ func (s *WebSetupStep) View(state *State) string {
 
 	sections = append(sections, "")
 
-	// Show setup image
-	imgURL := "https://pimylifeup.com/wp-content/uploads/2017/06/Raspberry-Pi-Nextcloud-Setup-Screen.jpg"
+	// Show setup image (from async cache)
 	sections = append(sections,
-		ui.ImageWithCaption(imgURL, "Nextcloud Setup Screen", state.Width-8),
+		ui.ImageWithCaption(setupImageURL, "Nextcloud Setup Screen", state.Width-8),
 		"",
 	)
 
@@ -112,9 +116,9 @@ func (s *WebSetupStep) View(state *State) string {
 		style.TextStyle.Render("  3. Click ")+style.BoldStyle.Render("\"Storage & Database\""),
 		style.TextStyle.Render("  4. Select ")+style.BoldStyle.Render("\"MySQL/MariaDB\""),
 		style.TextStyle.Render("  5. Enter database details:"),
-		style.TextStyle.Render(fmt.Sprintf("     • Database user: %s", style.CodeBlockStyle.Render(state.DBUser))),
-		style.TextStyle.Render(fmt.Sprintf("     • Database password: %s", style.CodeBlockStyle.Render("(your password)"))),
-		style.TextStyle.Render(fmt.Sprintf("     • Database name: %s", style.CodeBlockStyle.Render(state.DBName))),
+		style.TextStyle.Render(fmt.Sprintf("     - Database user: %s", style.CodeBlockStyle.Render(state.DBUser))),
+		style.TextStyle.Render(fmt.Sprintf("     - Database password: %s", style.CodeBlockStyle.Render("(your password)"))),
+		style.TextStyle.Render(fmt.Sprintf("     - Database name: %s", style.CodeBlockStyle.Render(state.DBName))),
 		style.TextStyle.Render("  6. Click ")+style.BoldStyle.Render("\"Finish Setup\""),
 		"",
 	)

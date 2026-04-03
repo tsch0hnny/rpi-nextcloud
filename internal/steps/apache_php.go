@@ -4,8 +4,8 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tsch0hnny/rpi-nextcloud/internal/style"
 	"github.com/tsch0hnny/rpi-nextcloud/internal/exec"
+	"github.com/tsch0hnny/rpi-nextcloud/internal/style"
 	"github.com/tsch0hnny/rpi-nextcloud/internal/ui"
 )
 
@@ -16,32 +16,35 @@ const (
 	apSudoPassword
 	apConfirmInstall
 	apUpdating
+	apUpgrading
+	apAddingPHPRepo
 	apInstallingApache
 	apInstallingPHP
+	apEnablingModules
 	apRestartingApache
 	apDone
 	apError
 )
 
 type ApachePHPStep struct {
-	phase        apachePhase
-	complete     bool
-	confirm      ui.ConfirmModel
+	phase         apachePhase
+	complete      bool
+	confirm       ui.ConfirmModel
 	passwordInput ui.PasswordModel
-	spinner      ui.SpinnerModel
-	output       string
-	errMsg       string
-	completedSub []string
+	spinner       ui.SpinnerModel
+	output        string
+	errMsg        string
+	completedSub  []string
 }
 
 func NewApachePHPStep() *ApachePHPStep {
 	return &ApachePHPStep{}
 }
 
-func (s *ApachePHPStep) ID() string       { return "apache-php" }
-func (s *ApachePHPStep) Title() string     { return "Apache & PHP" }
-func (s *ApachePHPStep) IsOptional() bool  { return false }
-func (s *ApachePHPStep) IsComplete() bool  { return s.complete }
+func (s *ApachePHPStep) ID() string      { return "apache-php" }
+func (s *ApachePHPStep) Title() string    { return "Apache & PHP" }
+func (s *ApachePHPStep) IsOptional() bool { return false }
+func (s *ApachePHPStep) IsComplete() bool { return s.complete }
 
 func (s *ApachePHPStep) Init(state *State) tea.Cmd {
 	s.phase = apSudoCheck
@@ -67,7 +70,6 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 			}
 		case apError:
 			if key.Matches(msg, style.Keys.Enter) {
-				// Retry
 				s.phase = apConfirmInstall
 				s.confirm = ui.NewConfirm("Retry installation?", true)
 				s.errMsg = ""
@@ -95,7 +97,6 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 					exec.RunSudoCommand("apt-update", "apt update -y"),
 				)
 			}
-			// User declined - skip? For required step, just re-ask
 			s.confirm = ui.NewConfirm("This step is required. Install Apache2 and PHP 8.4?", true)
 			return s, nil
 		}
@@ -104,7 +105,6 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 		switch msg.Tag {
 		case "check-sudo-nopass":
 			if msg.Err == nil {
-				// sudo works without password
 				s.phase = apConfirmInstall
 				s.confirm = ui.NewConfirm("Ready to install Apache2 and PHP 8.4?", true)
 				return s, nil
@@ -114,7 +114,6 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 				s.confirm = ui.NewConfirm("Ready to install Apache2 and PHP 8.4?", true)
 				return s, nil
 			}
-			// Need password
 			s.phase = apSudoPassword
 			s.passwordInput = ui.NewPassword("Sudo Password",
 				"Root privileges are required to install packages.")
@@ -136,6 +135,41 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 			if msg.Err != nil {
 				s.phase = apError
 				s.errMsg = "Failed to update packages: " + msg.Err.Error()
+				return s, nil
+			}
+			s.phase = apUpgrading
+			s.spinner = ui.NewSpinner("Upgrading installed packages...")
+			return s, tea.Batch(
+				s.spinner.Init(),
+				exec.RunSudoCommand("apt-upgrade", "DEBIAN_FRONTEND=noninteractive apt upgrade -y"),
+			)
+
+		case "apt-upgrade":
+			s.completedSub = append(s.completedSub, "Packages upgraded")
+			if msg.Err != nil {
+				s.phase = apError
+				s.errMsg = "Failed to upgrade packages: " + msg.Err.Error()
+				return s, nil
+			}
+			s.phase = apAddingPHPRepo
+			s.spinner = ui.NewSpinner("Adding PHP 8.4 repository...")
+			// Add the Sury PHP repo for PHP 8.4 (required on Debian/Raspbian)
+			addRepoCmd := `apt install -y lsb-release ca-certificates curl && ` +
+				`curl -sSLo /tmp/php.gpg https://packages.sury.org/php/apt.gpg && ` +
+				`gpg --dearmor < /tmp/php.gpg > /usr/share/keyrings/deb.sury.org-php.gpg 2>/dev/null && ` +
+				`echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/sury-php.list && ` +
+				`rm -f /tmp/php.gpg && ` +
+				`apt update -y`
+			return s, tea.Batch(
+				s.spinner.Init(),
+				exec.RunSudoCommand("add-php-repo", addRepoCmd),
+			)
+
+		case "add-php-repo":
+			s.completedSub = append(s.completedSub, "PHP 8.4 repository added")
+			if msg.Err != nil {
+				s.phase = apError
+				s.errMsg = "Failed to add PHP repository: " + msg.Err.Error()
 				return s, nil
 			}
 			s.phase = apInstallingApache
@@ -167,6 +201,20 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 			if msg.Err != nil {
 				s.phase = apError
 				s.errMsg = "Failed to install PHP: " + msg.Err.Error()
+				return s, nil
+			}
+			s.phase = apEnablingModules
+			s.spinner = ui.NewSpinner("Enabling Apache modules...")
+			return s, tea.Batch(
+				s.spinner.Init(),
+				exec.RunSudoCommand("enable-modules", "a2enmod rewrite headers env dir mime"),
+			)
+
+		case "enable-modules":
+			s.completedSub = append(s.completedSub, "Apache modules enabled (rewrite, headers, env, dir, mime)")
+			if msg.Err != nil {
+				s.phase = apError
+				s.errMsg = "Failed to enable Apache modules: " + msg.Err.Error()
 				return s, nil
 			}
 			s.phase = apRestartingApache
@@ -213,15 +261,23 @@ func (s *ApachePHPStep) View(state *State) string {
 		sections = append(sections, s.passwordInput.View())
 
 	case apConfirmInstall:
-		packages := ui.CodeBlock("sudo apt install apache2\nsudo apt install php8.4 php8.4-gd php8.4-sqlite3\n  php8.4-curl php8.4-zip php8.4-xml php8.4-mbstring\n  php8.4-mysql php8.4-bz2 php8.4-intl php8.4-smbclient\n  php8.4-gmp php8.4-bcmath libapache2-mod-php8.4")
+		packages := ui.CodeBlock(
+			"sudo apt update && sudo apt upgrade\n" +
+				"# Add PHP 8.4 repository (packages.sury.org)\n" +
+				"sudo apt install apache2\n" +
+				"sudo apt install php8.4 php8.4-gd php8.4-sqlite3\n" +
+				"  php8.4-curl php8.4-zip php8.4-xml php8.4-mbstring\n" +
+				"  php8.4-mysql php8.4-bz2 php8.4-intl php8.4-smbclient\n" +
+				"  php8.4-gmp php8.4-bcmath libapache2-mod-php8.4\n" +
+				"sudo a2enmod rewrite headers env dir mime")
 		sections = append(sections,
-			style.SubtitleStyle.Render("The following packages will be installed:"),
+			style.SubtitleStyle.Render("The following will be installed:"),
 			"", packages, "",
 			s.confirm.View(),
 		)
 
-	case apUpdating, apInstallingApache, apInstallingPHP, apRestartingApache:
-		// Show completed sub-steps
+	case apUpdating, apUpgrading, apAddingPHPRepo, apInstallingApache,
+		apInstallingPHP, apEnablingModules, apRestartingApache:
 		for _, sub := range s.completedSub {
 			sections = append(sections, style.SuccessStyle.Render("  ✓ "+sub))
 		}
