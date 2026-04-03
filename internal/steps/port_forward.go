@@ -96,22 +96,17 @@ func (s *PortForwardStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 			s.phase = pfUpdatingConfig
 			s.spinner = ui.NewSpinner("Updating trusted domains...")
 			s.completedSub = nil
-			// Use PHP to add the trusted domain properly
-			phpCmd := fmt.Sprintf(
-				`php -r "
-				\$f = '/var/www/nextcloud/config/config.php';
-				include \$f;
-				\$d = '%s';
-				\$found = false;
-				foreach (\$CONFIG['trusted_domains'] as \$v) { if (\$v === \$d) \$found = true; }
-				if (!\$found) {
-					\$CONFIG['trusted_domains'][] = \$d;
-					file_put_contents(\$f, '<?php' . PHP_EOL . '\$CONFIG = ' . var_export(\$CONFIG, true) . ';' . PHP_EOL);
-				}
-				echo 'done';
-				"`, state.ExternalDomain)
+			// Use Nextcloud's occ CLI to add the trusted domain
+			occCmd := fmt.Sprintf(
+				`cd /var/www/nextcloud && `+
+					`if sudo -u www-data php occ config:system:get trusted_domains 2>/dev/null | grep -qxF '%s'; then `+
+					`echo done; else `+
+					`IDX=$(sudo -u www-data php occ config:system:get trusted_domains 2>/dev/null | wc -l) && `+
+					`sudo -u www-data php occ config:system:set trusted_domains "$IDX" --value='%s' && `+
+					`echo done; fi`,
+				state.ExternalDomain, state.ExternalDomain)
 			return s, tea.Batch(s.spinner.Init(),
-				exec.RunSudoCommand("update-trusted", phpCmd))
+				exec.RunSudoCommand("update-trusted", occCmd))
 		}
 
 	case exec.CmdResult:
