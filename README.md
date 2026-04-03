@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat-square&logo=go" alt="Go">
+  <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Bubbletea-TUI-FF5F87?style=flat-square" alt="Bubbletea">
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Platform-Raspberry%20Pi-C51A4A?style=flat-square&logo=raspberrypi" alt="Raspberry Pi">
@@ -128,13 +128,20 @@ sudo ./nextcloud-installer
 ### From Source
 
 ```bash
+# Install Go 1.24+ (required — default Debian/Ubuntu packages are too old)
+wget https://go.dev/dl/go1.24.2.linux-arm64.tar.gz   # arm64: Pi 4/5
+# wget https://go.dev/dl/go1.24.2.linux-armv6l.tar.gz # armv6l: Pi Zero/3
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.24.2.linux-arm64.tar.gz
+export PATH=/usr/local/go/bin:$PATH
+
+# Build and run
 git clone https://github.com/tsch0hnny/rpi-nextcloud.git
 cd rpi-nextcloud
 go build -o nextcloud-installer .
 sudo ./nextcloud-installer
 ```
 
-> **Note:** Requires Go 1.22 or later. The binary must be run with `sudo` since it installs system packages and modifies Apache/PHP configuration.
+> **Note:** Requires **Go 1.24.2 or later** (the charmbracelet TUI libraries need it). The `golang-go` package from apt is typically too old — install from [go.dev/dl](https://go.dev/dl/) instead. The binary must be run with `sudo` since it installs system packages and modifies Apache/PHP configuration.
 
 ## Usage
 
@@ -179,7 +186,7 @@ sudo ./nextcloud-installer --images=none
 ## Building
 
 ### Requirements
-- Go 1.22+
+- Go 1.24+ (install from [go.dev/dl](https://go.dev/dl/), not from apt)
 
 ### Build
 
