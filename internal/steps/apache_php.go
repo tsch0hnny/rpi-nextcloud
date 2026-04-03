@@ -154,11 +154,17 @@ func (s *ApachePHPStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 			s.phase = apAddingPHPRepo
 			s.spinner = ui.NewSpinner("Adding PHP 8.4 repository...")
 			// Add the Sury PHP repo for PHP 8.4 (required on Debian/Raspbian)
+			// First check if sury repo is already configured (via debsuryorg-archive-keyring or manual setup)
+			// If so, skip adding it again to avoid GPG key path conflicts
 			addRepoCmd := `apt install -y lsb-release ca-certificates curl && ` +
+				`if grep -rqs 'packages.sury.org/php' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then ` +
+				`echo "Sury PHP repository already configured, skipping"; ` +
+				`else ` +
 				`curl -sSLo /tmp/php.gpg https://packages.sury.org/php/apt.gpg && ` +
 				`gpg --dearmor < /tmp/php.gpg > /usr/share/keyrings/deb.sury.org-php.gpg 2>/dev/null && ` +
 				`echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/sury-php.list && ` +
-				`rm -f /tmp/php.gpg && ` +
+				`rm -f /tmp/php.gpg; ` +
+				`fi && ` +
 				`apt update -y`
 			return s, tea.Batch(
 				s.spinner.Init(),
