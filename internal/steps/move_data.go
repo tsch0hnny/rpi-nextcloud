@@ -48,6 +48,7 @@ func (s *MoveDataStep) Init(state *State) tea.Cmd {
 	s.input = ui.NewInputWithValidation("Data Directory", "/var/nextcloud/data", state.DataDirectory,
 		"Moving the data directory outside of /var/www improves security.\nThis is also how you'd point to an external hard drive.",
 		ui.ValidatePath)
+	s.input.EscHint = "esc: skip"
 	return s.input.Init()
 }
 
@@ -56,6 +57,9 @@ func (s *MoveDataStep) Update(msg tea.Msg, state *State) (Step, tea.Cmd) {
 	case tea.KeyMsg:
 		switch s.phase {
 		case mdInputDir:
+			if key.Matches(msg, style.Keys.Escape) {
+				return s, func() tea.Msg { return StepSkipMsg{} }
+			}
 			var cmd tea.Cmd
 			s.input, cmd = s.input.Update(msg)
 			return s, cmd

@@ -211,13 +211,9 @@ func (m Model) renderHeader(width int) string {
 }
 
 func (m Model) renderFooter(width int) string {
-	hints := []string{}
-	if m.currentStep < len(m.steps) && m.steps[m.currentStep].IsOptional() {
-		hints = append(hints, style.KeyStyle.Render("esc")+style.KeyHintStyle.Render(": skip"))
+	hints := []string{
+		style.KeyStyle.Render("ctrl+c") + style.KeyHintStyle.Render(": quit"),
 	}
-	hints = append(hints,
-		style.KeyStyle.Render("ctrl+c")+style.KeyHintStyle.Render(": quit"),
-	)
 
 	return style.Divider(width) + "\n" + strings.Join(hints, "  ")
 }

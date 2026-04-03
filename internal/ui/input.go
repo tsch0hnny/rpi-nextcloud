@@ -14,6 +14,7 @@ type ValidateFunc func(string) string
 type InputModel struct {
 	Label       string
 	Description string
+	EscHint     string
 	input       textinput.Model
 	Done        bool
 	Value       string
@@ -103,7 +104,11 @@ func (m InputModel) View() string {
 		parts = append(parts, style.ErrorStyle.Render("  "+m.errMsg))
 	}
 
-	parts = append(parts, "", style.KeyHintStyle.Render("enter: confirm  esc: back"))
+	escHint := m.EscHint
+	if escHint == "" {
+		escHint = "esc: back"
+	}
+	parts = append(parts, "", style.KeyHintStyle.Render("enter: confirm  "+escHint))
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
