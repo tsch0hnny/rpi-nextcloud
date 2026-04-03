@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: arm64
+            name: nextcloud-installer-linux-arm64
+            label: "Raspberry Pi 4/5 (arm64)"
+          - goos: linux
+            goarch: arm
+            goarm: "6"
+            name: nextcloud-installer-linux-armv6
+            label: "Raspberry Pi 3/Zero/Zero 2 (armv6)"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build ${{ matrix.label }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: "0"
+        run: go build -ldflags="-s -w" -o ${{ matrix.name }} .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare binaries
+        run: |
+          mkdir -p release
+          cp artifacts/nextcloud-installer-linux-arm64/nextcloud-installer-linux-arm64 release/
+          cp artifacts/nextcloud-installer-linux-armv6/nextcloud-installer-linux-armv6 release/
+          chmod +x release/*
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## Raspberry Pi Nextcloud Installer
+
+            Download the binary for your Pi model and run it:
+
+            ```bash
+            chmod +x nextcloud-installer-*
+            sudo ./nextcloud-installer-linux-arm64    # Pi 4, Pi 5
+            sudo ./nextcloud-installer-linux-armv6    # Pi 3, Pi Zero, Pi Zero 2
+            ```
+
+            No Go toolchain required — just download and run.
+          files: |
+            release/nextcloud-installer-linux-arm64
+            release/nextcloud-installer-linux-armv6
